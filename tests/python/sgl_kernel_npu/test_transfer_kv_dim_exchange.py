@@ -21,7 +21,7 @@ HEAD_DIM = 128
 class TestTransferKV(unittest.TestCase):
 
     def _kv_transfer(
-        self, direct: TransferDirection, v_empty: bool, index_k_empty: bool = True
+        self, direct: TransferDirection, v_empty: bool, index_k_empty: bool = True, per_layer: bool = False
     ):
         torch.npu.set_device(0)
 
@@ -68,30 +68,59 @@ class TestTransferKV(unittest.TestCase):
         stream = torch.npu.Stream()
         start = time.time()
         with torch.npu.stream(stream):
-            if index_k_empty:
-                transfer_kv_dim_exchange(
-                    device_indices=device_indices,
-                    host_indices=host_indices,
-                    device_k=device_k,
-                    host_k=host_k,
-                    device_v=device_v,
-                    host_v=host_v,
-                    page_size=PAGE_SIZE,
-                    direction=direct,
-                )
+            if per_layer:
+                for i in range(NUM_LAYERS):
+                    if index_k_empty:
+                        transfer_kv_dim_exchange(
+                            device_indices=device_indices,
+                            host_indices=host_indices,
+                            device_k=device_k,
+                            host_k=host_k,
+                            device_v=device_v,
+                            host_v=host_v,
+                            page_size=PAGE_SIZE,
+                            layer_id=i,
+                            direction=direct,
+                        )
+                    else:
+                        transfer_kv_dim_exchange(
+                            device_indices=device_indices,
+                            host_indices=host_indices,
+                            device_k=device_k,
+                            host_k=host_k,
+                            device_v=device_v,
+                            host_v=host_v,
+                            device_index_k=device_index_k,
+                            host_index_k=host_index_k,
+                            page_size=PAGE_SIZE,
+                            layer_id=i,
+                            direction=direct,
+                        )
             else:
-                transfer_kv_dim_exchange(
-                    device_indices=device_indices,
-                    host_indices=host_indices,
-                    device_k=device_k,
-                    host_k=host_k,
-                    device_v=device_v,
-                    host_v=host_v,
-                    device_index_k=device_index_k,
-                    host_index_k=host_index_k,
-                    page_size=PAGE_SIZE,
-                    direction=direct,
-                )
+                if index_k_empty:
+                    transfer_kv_dim_exchange(
+                        device_indices=device_indices,
+                        host_indices=host_indices,
+                        device_k=device_k,
+                        host_k=host_k,
+                        device_v=device_v,
+                        host_v=host_v,
+                        page_size=PAGE_SIZE,
+                        direction=direct,
+                    )
+                else:
+                    transfer_kv_dim_exchange(
+                        device_indices=device_indices,
+                        host_indices=host_indices,
+                        device_k=device_k,
+                        host_k=host_k,
+                        device_v=device_v,
+                        host_v=host_v,
+                        device_index_k=device_index_k,
+                        host_index_k=host_index_k,
+                        page_size=PAGE_SIZE,
+                        direction=direct,
+                    )
 
         end = time.time()
         direct_str = "D2H" if direct == TransferDirection.D2H else "H2D"
@@ -110,10 +139,11 @@ class TestTransferKV(unittest.TestCase):
             * torch.bfloat16.itemsize
         )
         print(
-            f"kv transfer {direct_str}, {v_empty=}, {index_k_empty=}, "
+            f"kv transfer {direct_str}, {v_empty=}, {index_k_empty=}, {per_layer=}, "
             f"2d copy times is {copy_times}, "
             f"total copy size is {total_size} bytes, "
-            f"total duration {float((end - start) * 1000):.3f}ms"
+            f"total duration {float((end - start) * 1000):.3f}ms, "
+            f"speed {float(total_size) / 1024 / 1024 / 1024 / (end - start):.3f}GB/s"
         )
         torch.npu.synchronize()
         return device_kv_buffer, host_kv_buffer
@@ -174,6 +204,23 @@ class TestTransferKV(unittest.TestCase):
 
     def test_kv_index_k_copy_h2d(self):
         device_kv, host_kv = self._kv_transfer(TransferDirection.H2D, False, False)
+
+        self.assertAlmostEqual(
+            device_kv.sum().cpu().item(),
+            host_kv.sum().item(),
+            delta=1e-3,
+            msg="device value should be equal to host value after transfer kv and index k h2d",
+        )
+
+        self.assertAlmostEqual(
+            device_kv.sum().cpu().item(),
+            0,
+            delta=1e-3,
+            msg="device value sum() should be equal to 0 after transfer kv and index k h2d",
+        )
+
+    def test_kv_index_k_copy_h2d_per_layer(self):
+        device_kv, host_kv = self._kv_transfer(TransferDirection.H2D, False, False, True)
 
         self.assertAlmostEqual(
             device_kv.sum().cpu().item(),

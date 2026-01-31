@@ -23,6 +23,7 @@ def transfer_kv_dim_exchange(
     device_index_k: Optional[torch.Tensor] = None,
     host_index_k: Optional[torch.Tensor] = None,
     page_size: int = 128,
+    layer_id: int = -1,
     direction: TransferDirection = TransferDirection.H2D,
     flags: TransferFlag = TransferFlag.FAST2D,
 ):
@@ -39,6 +40,7 @@ def transfer_kv_dim_exchange(
         device_index_k: index_k_buffer in device
         host_index_k: index_k_buffer in host
         page_size: page size
+        layer_id: layer id used to layer wise
         direction: only support H2D and D2H.
         flags: only FAST2D is supported, which indicates 2D data transfer via calling aclrtMemcpy2dAsync.
     """
@@ -50,6 +52,7 @@ def transfer_kv_dim_exchange(
         device_indices,
         host_indices,
         page_size,
+        layer_id,
         direction.value,
         flags.value,
     )
@@ -62,6 +65,7 @@ def transfer_kv_dim_exchange(
             device_indices,
             host_indices,
             page_size,
+            layer_id,
             direction.value,
             flags.value,
         )
